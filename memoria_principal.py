@@ -3,9 +3,9 @@ import json
 from enum import Enum
 
 import paho.mqtt.client as paho
-import paho.mqtt.publish as publish
 
 from tipo_peticion import TipoPeticion
+from administrador_mensajes import AdministradorMensajes
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -14,20 +14,7 @@ KEEP_ALIVE = 60
 MSI = "msi"
 
 MEM = "MEM"
-
-
-def publicar_mensaje(peticion, bloque, valor, origen):
-    payload = {
-        "bloque": bloque
-    }
-
-    if peticion == TipoPeticion.RESPUESTA_BLOQUE_LECTURA or peticion == TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA:
-        payload["valor"] = valor
-
-    payload["origen"] = origen
-
-    json_payload = json.dumps(payload)
-    publish.single(topic=f"{MSI}/{peticion}", payload=json_payload, hostname=HOST)
+VALOR_NULO = "MEM-0"
 
 
 class EstadoCacheMemoria(Enum):
@@ -38,11 +25,11 @@ class EstadoCacheMemoria(Enum):
 class CacheMemoria:
     def __init__(self):
         self.__bloques = {
-            'A': (0, EstadoCacheMemoria.VALIDO),
-            'B': (0, EstadoCacheMemoria.VALIDO),
-            'C': (0, EstadoCacheMemoria.VALIDO),
-            'D': (0, EstadoCacheMemoria.VALIDO),
-            'E': (0, EstadoCacheMemoria.VALIDO),
+            'A': (VALOR_NULO, EstadoCacheMemoria.VALIDO),
+            'B': (VALOR_NULO, EstadoCacheMemoria.VALIDO),
+            'C': (VALOR_NULO, EstadoCacheMemoria.VALIDO),
+            'D': (VALOR_NULO, EstadoCacheMemoria.VALIDO),
+            'E': (VALOR_NULO, EstadoCacheMemoria.VALIDO),
         }
 
     def get_bloque(self, bloque) -> (int, EstadoCacheMemoria):
@@ -68,9 +55,9 @@ class MemoriaPrincipal:
 
         if estado_actual == EstadoCacheMemoria.VALIDO:
             if evento == TipoPeticion.PETICION_LECTURA.value:
-                publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, MEM)
+                AdministradorMensajes.publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, MEM)
             elif evento == TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value:
-                publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA, bloque, valor_actual, MEM)
+                AdministradorMensajes.publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, MEM)
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheMemoria.INVALIDO)
         elif estado_actual == EstadoCacheMemoria.INVALIDO:
             if evento == TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value:

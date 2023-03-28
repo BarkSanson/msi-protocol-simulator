@@ -3,11 +3,11 @@ import threading
 from enum import Enum
 
 import paho.mqtt.client as paho
-import paho.mqtt.publish as publish
 
 from tipo_peticion import TipoPeticion
 from evento import Evento, TipoEventoProcesador
 from evento_provider import EventoProvider
+from administrador_mensajes import AdministradorMensajes
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -15,20 +15,7 @@ KEEP_ALIVE = 60
 
 MSI = "msi"
 ID = "P1"
-
-
-def publicar_mensaje(peticion, bloque, origen, valor=None):
-    payload = {
-        "bloque": bloque
-    }
-
-    if peticion == TipoPeticion.RESPUESTA_BLOQUE_LECTURA or peticion == TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA:
-        payload["valor"] = valor
-
-    payload["origen"] = origen
-
-    json_payload = json.dumps(payload)
-    publish.single(topic=f"{MSI}/{peticion}", payload=json_payload, hostname=HOST)
+VALOR_NUL0 = f"{ID}-0"
 
 
 class EstadoCacheCpu(Enum):
@@ -40,11 +27,11 @@ class EstadoCacheCpu(Enum):
 class CacheCpu:
     def __init__(self):
         self.__bloques = {
-            'A': (0, EstadoCacheCpu.INVALIDO),
-            'B': (0, EstadoCacheCpu.INVALIDO),
-            'C': (0, EstadoCacheCpu.INVALIDO),
-            'D': (0, EstadoCacheCpu.INVALIDO),
-            'E': (0, EstadoCacheCpu.INVALIDO),
+            'A': (VALOR_NUL0, EstadoCacheCpu.INVALIDO),
+            'B': (VALOR_NUL0, EstadoCacheCpu.INVALIDO),
+            'C': (VALOR_NUL0, EstadoCacheCpu.INVALIDO),
+            'D': (VALOR_NUL0, EstadoCacheCpu.INVALIDO),
+            'E': (VALOR_NUL0, EstadoCacheCpu.INVALIDO),
         }
 
     def get_bloque(self, bloque) -> (int, EstadoCacheCpu):
@@ -62,8 +49,8 @@ class CacheCpu:
 
 
 class Cpu:
-    def __init__(self, id: str, cache: CacheCpu, evento_provider: EventoProvider):
-        self.__id = id
+    def __init__(self, name: str, cache: CacheCpu, evento_provider: EventoProvider):
+        self.__name = name
         self.__cache = cache
         self.__evento_provider = evento_provider
 
@@ -78,19 +65,19 @@ class Cpu:
             if estado_actual == EstadoCacheCpu.INVALIDO:
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
-                    publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__id)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
                 elif tipo_evento == TipoEventoProcesador.PR_LEC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
-                    publicar_mensaje(TipoPeticion.PETICION_LECTURA, bloque, self.__id)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
             elif estado_actual == EstadoCacheCpu.COMPARTIDO:
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
-                    publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__id)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
 
     def __procesar_mensaje(self, evento, bloque, valor, origen):
         valor_actual, estado_actual = self.__cache.get_bloque(bloque)
 
-        if origen == self.__id:
+        if origen == self.__name:
             return
 
         if estado_actual == EstadoCacheCpu.COMPARTIDO:
@@ -98,10 +85,10 @@ class Cpu:
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.INVALIDO)
         elif estado_actual == EstadoCacheCpu.MODIFICADO:
             if evento == TipoPeticion.PETICION_LECTURA:
-                publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, self.__id)
+                AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
             elif evento == TipoPeticion.PETICION_LECTURA_EXCLUSIVA:
-                publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA, bloque, valor_actual, self.__id)
+                AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
 
     def on_message(self, client, userdata, msg):
         topic = msg.topic

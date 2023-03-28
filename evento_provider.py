@@ -2,6 +2,7 @@ from enum import Enum
 
 from evento import Evento, TipoEventoProcesador
 
+
 class EventoProvider:
     def __init__(self, file: str):
         with open(file, "r") as file:
