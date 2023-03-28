@@ -9,6 +9,7 @@ from evento import TipoEventoProcesador
 from evento_provider import EventoProvider
 from administrador_mensajes import AdministradorMensajes
 from procesador_mensajes import ProcesadorMensajes
+from eventos_file_writer import EventosFileWriter
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -61,6 +62,7 @@ class Cpu(ProcesadorMensajes):
         evento = self.__evento_provider.leer_evento()
         tipo_evento = evento.tipo_evento
         bloque = evento.bloque
+        valor = evento.valor
         valor_actual, estado_actual = self.__cache.get_bloque(bloque)
 
         while evento is not None:
@@ -68,13 +70,26 @@ class Cpu(ProcesadorMensajes):
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
                     AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+
+                    EventosFileWriter.escribir_evento(
+                        fichero=f"{self.__name}.txt",
+                        evento=TipoEventoProcesador.PR_ESC.value(),
+                        bloque=bloque,
+                        valor=valor)
                 elif tipo_evento == TipoEventoProcesador.PR_LEC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
                     AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+
             elif estado_actual == EstadoCacheCpu.COMPARTIDO:
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
                     self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
                     AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+
+                    EventosFileWriter.escribir_evento(
+                        fichero=f"{self.__name}.txt",
+                        evento=TipoEventoProcesador.PR_ESC.value(),
+                        bloque=bloque,
+                        valor=valor)
 
             sleep_time = random.randint(1, 10)
             time.sleep(sleep_time)
@@ -103,6 +118,7 @@ def main():
     evento_provider = EventoProvider(f"{ID}.txt")
     cpu = Cpu(ID, cache, evento_provider)
     msg_admin = AdministradorMensajes(cpu)
+
     client = paho.Client()
     client.on_message = msg_admin.on_message
 
