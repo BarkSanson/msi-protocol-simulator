@@ -1,15 +1,16 @@
+import sys
 import random
 import time
 from enum import Enum
 
 import paho.mqtt.client as paho
 
-from tipo_peticion import TipoPeticion
+from administrador_mensajes import AdministradorMensajes
 from evento import TipoEventoProcesador
 from evento_provider import EventoProvider
-from administrador_mensajes import AdministradorMensajes
-from procesador_mensajes import ProcesadorMensajes
 from eventos_file_writer import EventosFileWriter
+from procesador_mensajes import ProcesadorMensajes
+from tipo_peticion import TipoPeticion
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -60,55 +61,115 @@ class Cpu(ProcesadorMensajes):
 
     def ejecutar_operaciones(self):
         evento = self.__evento_provider.leer_evento()
-        tipo_evento = evento.tipo_evento
-        bloque = evento.bloque
-        valor = evento.valor
-        valor_actual, estado_actual = self.__cache.get_bloque(bloque)
 
         while evento is not None:
+            tipo_evento = evento.tipo_evento
+            bloque = evento.bloque
+            valor = evento.valor
+            valor_actual, estado_actual = self.__cache.get_bloque(bloque)
+
             if estado_actual == EstadoCacheCpu.INVALIDO:
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
-                    self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
-                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value, bloque, self.__name)
+
+                    self.esperar_por_estado(bloque, EstadoCacheCpu.MODIFICADO)
 
                     EventosFileWriter.escribir_evento(
-                        fichero=f"{self.__name}.txt",
-                        evento=TipoEventoProcesador.PR_ESC.value(),
+                        fichero=f"{self.__name}-out.txt",
+                        evento=TipoEventoProcesador.PR_ESC.value,
                         bloque=bloque,
                         valor=valor)
                 elif tipo_evento == TipoEventoProcesador.PR_LEC:
-                    self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
-                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA.value, bloque, self.__name)
 
+                    self.esperar_por_estado(bloque, EstadoCacheCpu.COMPARTIDO)
             elif estado_actual == EstadoCacheCpu.COMPARTIDO:
                 if tipo_evento == TipoEventoProcesador.PR_ESC:
-                    self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
-                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+                    AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value, bloque, self.__name)
+
+                    self.esperar_por_estado(bloque, EstadoCacheCpu.MODIFICADO)
 
                     EventosFileWriter.escribir_evento(
-                        fichero=f"{self.__name}.txt",
-                        evento=TipoEventoProcesador.PR_ESC.value(),
+                        fichero=f"{self.__name}-out.txt",
+                        evento=TipoEventoProcesador.PR_ESC.value,
+                        bloque=bloque,
+                        valor=valor)
+                elif tipo_evento == TipoEventoProcesador.PR_LEC:
+                    EventosFileWriter.escribir_evento(
+                        fichero=f"{self.__name}-out.txt",
+                        evento=TipoEventoProcesador.PR_LEC.value,
+                        bloque=bloque,
+                        valor=valor_actual)
+
+            elif estado_actual == EstadoCacheCpu.MODIFICADO:
+                self.__cache.cambia_valor_bloque(bloque, valor)
+                if tipo_evento == TipoEventoProcesador.PR_ESC:
+                    EventosFileWriter.escribir_evento(
+                        fichero=f"{self.__name}-out.txt",
+                        evento=TipoEventoProcesador.PR_ESC.value,
                         bloque=bloque,
                         valor=valor)
 
-            sleep_time = random.randint(1, 10)
-            time.sleep(sleep_time)
 
-    def procesar_mensaje(self, evento, bloque, origen, valor=None):
+            evento = self.__evento_provider.leer_evento()
+
+            sleep_time = random.randint(1, 10)
+            # time.sleep(sleep_time)
+            time.sleep(1)
+
+    def esperar_por_estado(self, bloque, estado: EstadoCacheCpu):
+        _, estado_actual = self.__cache.get_bloque(bloque)
+
+        while estado_actual != estado:
+            _, estado_actual = self.__cache.get_bloque(bloque)
+
+    def procesar_mensaje(self, peticion, bloque, origen, destino=None, valor=None):
         valor_actual, estado_actual = self.__cache.get_bloque(bloque)
 
         if origen == self.__name:
             return
 
         if estado_actual == EstadoCacheCpu.COMPARTIDO:
-            if evento == TipoPeticion.PETICION_LECTURA_EXCLUSIVA:
+            if peticion == TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value:
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.INVALIDO)
+            elif peticion == TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA.value and destino == self.__name:
+                self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
+                # self.__cache.cambia_valor_bloque(bloque, valor)
         elif estado_actual == EstadoCacheCpu.MODIFICADO:
-            if evento == TipoPeticion.PETICION_LECTURA:
-                AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+            if peticion == TipoPeticion.PETICION_LECTURA.value:
+                AdministradorMensajes.publicar_mensaje(
+                    TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value,
+                    bloque,
+                    self.__name,
+                    origen,
+                    valor_actual
+                )
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
-            elif evento == TipoPeticion.PETICION_LECTURA_EXCLUSIVA:
-                AdministradorMensajes.publicar_mensaje(TipoPeticion.PETICION_LECTURA_EXCLUSIVA, bloque, self.__name)
+            elif peticion == TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value:
+                AdministradorMensajes.publicar_mensaje(
+                    TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA.value,
+                    bloque,
+                    self.__name,
+                    origen,
+                    valor_actual
+                )
+        elif estado_actual == EstadoCacheCpu.INVALIDO:
+            if peticion == TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA.value \
+                    or peticion == TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value:
+                if destino == self.__name:
+                    if peticion == TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA.value:
+                        self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.MODIFICADO)
+                    elif peticion == TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value:
+                        self.__cache.cambia_estado_bloque(bloque, EstadoCacheCpu.COMPARTIDO)
+
+                    self.__cache.cambia_valor_bloque(bloque, valor)
+
+                    EventosFileWriter.escribir_evento(
+                        fichero=f"{self.__name}-out.txt",
+                        evento=TipoEventoProcesador.PR_LEC.value,
+                        bloque=bloque,
+                        valor=valor
+                    )
 
 
 def main():
@@ -120,13 +181,13 @@ def main():
     msg_admin = AdministradorMensajes(cpu)
 
     client = paho.Client()
-    client.on_message = msg_admin.on_message
-
     client.connect(HOST, PORT, KEEP_ALIVE)
 
     print(f"Connected to {HOST}:{PORT}")
 
     client.subscribe(f"{MSI}/#", 0)
+
+    client.on_message = msg_admin.on_message
 
     client.loop_start()
 

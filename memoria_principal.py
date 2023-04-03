@@ -1,12 +1,10 @@
-import threading
-import json
 from enum import Enum
 
 import paho.mqtt.client as paho
 
-from tipo_peticion import TipoPeticion
 from administrador_mensajes import AdministradorMensajes
 from procesador_mensajes import ProcesadorMensajes
+from tipo_peticion import TipoPeticion
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -51,20 +49,30 @@ class MemoriaPrincipal(ProcesadorMensajes):
     def __init__(self, cache: CacheMemoria):
         self.__cache = cache
 
-    def procesar_mensaje(self, evento, bloque, origen, valor=None):
+    def procesar_mensaje(self, peticion, bloque, origen, destino=None, valor=None):
         valor_actual, estado_actual = self.__cache.get_bloque(bloque)
 
         if origen == MEM:
             return
 
         if estado_actual == EstadoCacheMemoria.VALIDO:
-            if evento == TipoPeticion.PETICION_LECTURA.value:
-                AdministradorMensajes.publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, MEM)
-            elif evento == TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value:
-                AdministradorMensajes.publicar_mensaje(TipoPeticion.RESPUESTA_BLOQUE_LECTURA, bloque, valor_actual, MEM)
+            if peticion == TipoPeticion.PETICION_LECTURA.value:
+                AdministradorMensajes.publicar_mensaje(
+                    TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value,
+                    bloque,
+                    MEM,
+                    origen,
+                    valor_actual)
+            elif peticion == TipoPeticion.PETICION_LECTURA_EXCLUSIVA.value:
+                AdministradorMensajes.publicar_mensaje(
+                    TipoPeticion.RESPUESTA_BLOQUE_EXCLUSIVA.value,
+                    bloque,
+                    MEM,
+                    origen,
+                    valor_actual)
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheMemoria.INVALIDO)
         elif estado_actual == EstadoCacheMemoria.INVALIDO:
-            if evento == TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value:
+            if peticion == TipoPeticion.RESPUESTA_BLOQUE_LECTURA.value:
                 self.__cache.cambia_estado_bloque(bloque, EstadoCacheMemoria.VALIDO)
                 self.__cache.cambia_valor_bloque(bloque, valor)
 
@@ -73,8 +81,8 @@ def main():
     cache = CacheMemoria()
     memoria = MemoriaPrincipal(cache)
     msg_admin = AdministradorMensajes(memoria)
+
     client = paho.Client()
-    client.on_message = msg_admin.on_message
 
     client.connect(HOST, PORT, KEEP_ALIVE)
 
@@ -82,7 +90,9 @@ def main():
 
     client.subscribe(f"{MSI}/#", 0)
 
-    client.loop_start()
+    client.on_message = msg_admin.on_message
+
+    client.loop_forever()
 
 
 if __name__ == '__main__':
